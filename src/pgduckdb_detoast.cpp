@@ -36,10 +36,17 @@ namespace pgduckdb {
 
 struct varlena *
 PglzDecompressDatum(const struct varlena *value) {
+#if PG_VERSION_NUM >= 140000
 	struct varlena *result = (struct varlena *)duckdb_malloc(VARDATA_COMPRESSED_GET_EXTSIZE(value) + VARHDRSZ);
 
 	int32 raw_size = pglz_decompress((char *)value + VARHDRSZ_COMPRESSED, VARSIZE(value) - VARHDRSZ_COMPRESSED,
 	                                 VARDATA(result), VARDATA_COMPRESSED_GET_EXTSIZE(value), true);
+#else
+	struct varlena *result = (struct varlena *)duckdb_malloc(TOAST_COMPRESS_RAWSIZE(value) + VARHDRSZ);
+
+	int32 raw_size = pglz_decompress(TOAST_COMPRESS_RAWDATA(value), TOAST_COMPRESS_SIZE(value),
+	                                 VARDATA(result), TOAST_COMPRESS_RAWSIZE(value), true);
+#endif
 	if (raw_size < 0) {
 		throw duckdb::InvalidInputException("(PGDuckDB/PglzDecompressDatum) Compressed pglz data is corrupt");
 	}
@@ -71,6 +78,7 @@ Lz4DecompresDatum(const struct varlena *value) {
 
 static struct varlena *
 ToastDecompressDatum(struct varlena *attr) {
+#if PG_VERSION_NUM >= 140000
 	ToastCompressionId cmid = (ToastCompressionId)TOAST_COMPRESS_METHOD(attr);
 	switch (cmid) {
 	case TOAST_PGLZ_COMPRESSION_ID:
@@ -82,12 +90,18 @@ ToastDecompressDatum(struct varlena *attr) {
 		                                    TOAST_COMPRESS_METHOD(attr));
 		return NULL; /* keep compiler quiet */
 	}
+#else
+	return PglzDecompressDatum(attr);
+#endif
 }
 
 bool
 table_relation_fetch_toast_slice(const struct varatt_external &toast_pointer, int32 attrsize, struct varlena *result) {
+#if 0 // GPDB-specific change
 	Relation toast_rel = try_table_open(toast_pointer.va_toastrelid, AccessShareLock);
-
+#else
+	Relation toast_rel = try_table_open(toast_pointer.va_toastrelid, AccessShareLock, false);
+#endif
 	if (toast_rel == NULL) {
 		return false;
 	}
@@ -108,7 +122,11 @@ ToastFetchDatum(struct varlena *attr) {
 	struct varatt_external toast_pointer;
 	VARATT_EXTERNAL_GET_POINTER(toast_pointer, attr);
 
+#if PG_VERSION_NUM >= 140000
 	int32 attrsize = VARATT_EXTERNAL_GET_EXTSIZE(toast_pointer);
+#else
+	int32 attrsize = toast_pointer.va_extsize;
+#endif
 
 	struct varlena *result = (struct varlena *)duckdb_malloc(attrsize + VARHDRSZ);
 
