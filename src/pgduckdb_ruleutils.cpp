@@ -700,9 +700,11 @@ pgduckdb_get_tabledef(Oid relation_oid) {
 		appendStringInfo(&buffer, "%s ", quote_identifier(column_name));
 		appendStringInfoString(&buffer, column_type_name);
 
+#if PG_VERSION_NUM >= 140000
 		if (column->attcompression) {
 			elog(ERROR, "Column compression is not supported in DuckDB");
 		}
+#endif
 
 		if (column->attidentity) {
 			elog(ERROR, "Identity columns are not supported in DuckDB");
