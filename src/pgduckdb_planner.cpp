@@ -149,7 +149,11 @@ DuckdbPlanNode(Query *parse, int cursor_options, bool throw_error) {
 	 * top because or CustomScan does not support backwards scanning.
 	 */
 	if (cursor_options & CURSOR_OPT_SCROLL) {
+#if 0 // GPDB-specific change
 		duckdb_plan = materialize_finished_plan(duckdb_plan);
+#else
+		elog(ERROR, "GPDB: CURSOR_OPT_SCROLL is not supported yet");
+#endif
 	}
 
 	RangeTblEntry *rte = DuckdbRangeTableEntry(custom_scan);
