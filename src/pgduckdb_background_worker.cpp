@@ -372,7 +372,7 @@ bool
 HasBgwRunningForMyDatabase() {
 	const auto num_backends = pgstat_fetch_stat_numbackends();
 	for (int backend_idx = 1; backend_idx <= num_backends; ++backend_idx) {
-#if PG_VERSION_NUM >= 140000 && PG_VERSION_NUM < 160000
+#if PG_VERSION_NUM < 160000
 		PgBackendStatus *beentry = pgstat_fetch_stat_beentry(backend_idx);
 #else
 		LocalPgBackendStatus *local_beentry = pgstat_get_local_beentry_by_index(backend_idx);
