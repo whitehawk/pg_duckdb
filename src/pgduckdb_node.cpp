@@ -237,7 +237,11 @@ ExecuteQuery(DuckdbScanState *state) {
 			}
 			// Delete the scan state
 			// Process the interrupt on the Postgres side
+#if 0 // GPDB-specific change
 			ProcessInterrupts();
+#else
+			ProcessInterrupts(__FILE__, __LINE__);
+#endif
 			throw duckdb::Exception(duckdb::ExceptionType::EXECUTOR, "Query cancelled");
 		}
 	}
