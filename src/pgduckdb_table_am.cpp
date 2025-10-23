@@ -153,10 +153,12 @@ duckdb_tuple_satisfies_snapshot(Relation /*rel*/, TupleTableSlot * /*slot*/, Sna
 	NOT_IMPLEMENTED();
 }
 
+#if PG_VERSION_NUM >= 140000
 static TransactionId
 duckdb_index_delete_tuples(Relation /*rel*/, TM_IndexDeleteOp * /*delstate*/) {
 	NOT_IMPLEMENTED();
 }
+#endif
 
 /* ----------------------------------------------------------------------------
  *  Functions for manipulations of physical tuples for duckdb AM.
@@ -431,9 +433,11 @@ static const TableAmRoutine duckdb_methods = {.type = T_TableAmRoutine,
                                               .scan_rescan = duckdb_scan_rescan,
                                               .scan_getnextslot = duckdb_scan_getnextslot,
 
+#if PG_VERSION_NUM >= 140000
                                               /* optional callbacks */
                                               .scan_set_tidrange = NULL,
                                               .scan_getnextslot_tidrange = NULL,
+#endif
 
                                               /* these are common helper functions */
                                               .parallelscan_estimate = table_block_parallelscan_estimate,
@@ -449,7 +453,9 @@ static const TableAmRoutine duckdb_methods = {.type = T_TableAmRoutine,
                                               .tuple_tid_valid = duckdb_tuple_tid_valid,
                                               .tuple_get_latest_tid = duckdb_get_latest_tid,
                                               .tuple_satisfies_snapshot = duckdb_tuple_satisfies_snapshot,
+#if PG_VERSION_NUM >= 140000
                                               .index_delete_tuples = duckdb_index_delete_tuples,
+#endif
 
                                               .tuple_insert = duckdb_tuple_insert,
                                               .tuple_insert_speculative = duckdb_tuple_insert_speculative,
