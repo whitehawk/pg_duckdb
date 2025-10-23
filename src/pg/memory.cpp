@@ -24,9 +24,16 @@ MemoryContextReset(MemoryContext context) {
 	PostgresFunctionGuard(::MemoryContextReset, context);
 }
 
+// GPDB-specific
+#undef MemoryContextDelete
+
 void
 MemoryContextDelete(MemoryContext context) {
+#if 0 // GPDB-specific
 	PostgresFunctionGuard(::MemoryContextDelete, context);
+#else
+	PostgresFunctionGuard(::MemoryContextDeleteGPDB, context);
+#endif
 }
 
 } // namespace pgduckdb::pg
