@@ -21,7 +21,11 @@ extern "C" {
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
+#if PG_VERSION_NUM >= 140000
 #include "utils/wait_event.h"
+#else
+#include "pgstat.h"
+#endif
 }
 
 #include "pgduckdb/vendor/pg_list.hpp"
