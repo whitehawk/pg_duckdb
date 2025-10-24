@@ -49,7 +49,11 @@ standard_ExplainOneQuery(Query *query, int cursorOptions, IntoClause *into, Expl
 	}
 
 	/* run it (if needed) and produce output */
+#if 0 // GPDB-specific
 	ExplainOnePlan(plan, into, es, queryString, params, queryEnv, &planduration, (es->buffers ? &bufusage : NULL));
+#else
+	ExplainOnePlan(plan, into, es, queryString, params, queryEnv, &planduration, 0);
+#endif
 }
 #endif
 }
