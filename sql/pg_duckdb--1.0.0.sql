@@ -102,8 +102,8 @@ END;
 $$ LANGUAGE PLpgSQL;
 REVOKE ALL ON FUNCTION duckdb._update_extensions_table_seq() FROM PUBLIC;
 
-CREATE TRIGGER extensions_table_seq_tr AFTER INSERT OR UPDATE OR DELETE ON extensions
-EXECUTE FUNCTION duckdb._update_extensions_table_seq();
+--CREATE TRIGGER extensions_table_seq_tr AFTER INSERT OR UPDATE OR DELETE ON extensions
+--EXECUTE FUNCTION duckdb._update_extensions_table_seq();
 
 -- The following might seem unnecesasry, but it's needed to know if a dropped
 -- table was a DuckDB table or not. See the comments and code in
