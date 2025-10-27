@@ -5632,11 +5632,22 @@ get_target_list(List *targetList, deparse_context *context,
 
 	sep = " ";
 	colno = 0;
+
+	StarReconstructionContext star_reconstruction_context = {0};
+	star_reconstruction_context.target_list = targetList;
+
+	bool outermost_targetlist = outermost_query;
+	outermost_query = false;
+
 	foreach(l, targetList)
 	{
 		TargetEntry *tle = (TargetEntry *) lfirst(l);
 		char	   *colname;
 		char	   *attname;
+
+		if (pgduckdb_reconstruct_star_step(&star_reconstruction_context, l)) {
+			continue;
+		}
 
 		if (tle->resjunk)
 			continue;			/* ignore junk entries */
@@ -5662,8 +5673,10 @@ get_target_list(List *targetList, deparse_context *context,
 		 * directly so that we can tell it to do the right thing, and so that
 		 * we can get the attribute name which is the default AS label.
 		 */
+		Var *var = NULL;
 		if (tle->expr && (IsA(tle->expr, Var)))
 		{
+			var = (Var *) tle->expr;
 			attname = get_variable((Var *) tle->expr, 0, true, context);
 		}
 		else
@@ -5684,8 +5697,33 @@ get_target_list(List *targetList, deparse_context *context,
 		else
 			colname = tle->resname;
 
+		/*
+		 * This makes sure we don't add Postgres its bad default alias to the
+		 * duckdb.row type.
+		 */
+		bool duckdb_skip_as = pgduckdb_var_is_duckdb_row(var);
+
+		/*
+		 * For r['abc'] expressions we don't want the column name to be r, but
+		 * instead we want it to be "abc". We can only to do this for the
+		 * target list of the outside most query though to make sure references
+		 * to the column name are still valid.
+		 */
+		if (!duckdb_skip_as && outermost_targetlist) {
+			Var *subscript_var = pgduckdb_duckdb_subscript_var(tle->expr);
+			if (subscript_var) {
+				/*
+				 * This cannot be moved to pgduckdb_ruleutils, because of
+				 * the reliance on the non-public deparse_namespace type.
+				 */
+				deparse_namespace* dpns = (deparse_namespace *) list_nth(context->namespaces,
+															subscript_var->varlevelsup);
+				duckdb_skip_as = !pgduckdb_subscript_has_custom_alias(dpns->plan, dpns->rtable, subscript_var, colname);
+			}
+		}
+
 		/* Show AS unless the column's name is correct as-is */
-		if (colname)			/* resname could be NULL */
+		if (colname && !duckdb_skip_as)			/* resname could be NULL */
 		{
 			if (attname == NULL || strcmp(attname, colname) != 0)
 				appendStringInfo(&targetbuf, " AS %s", quote_identifier(colname));
@@ -10473,6 +10511,73 @@ get_from_clause(Query *query, const char *prefix, deparse_context *context)
 	}
 }
 
+/*
+ * get_rte_alias - print the relation's alias, if needed
+ *
+ * If printed, the alias is preceded by a space, or by " AS " if use_as is true.
+ */
+static void
+get_rte_alias(RangeTblEntry *rte, int varno, bool use_as,
+			  deparse_context *context)
+{
+	deparse_namespace *dpns = (deparse_namespace *) linitial(context->namespaces);
+	char	   *refname = get_rtable_name(varno, context);
+	deparse_columns *colinfo = deparse_columns_fetch(varno, dpns);
+	bool		printalias = false;
+
+	if (rte->alias != NULL)
+	{
+		/* Always print alias if user provided one */
+		printalias = true;
+	}
+	else if (colinfo->printaliases)
+	{
+		/* Always print alias if we need to print column aliases */
+		printalias = true;
+	}
+	else if (rte->rtekind == RTE_RELATION)
+	{
+		/*
+		 * No need to print alias if it's same as relation name (this would
+		 * normally be the case, but not if set_rtable_names had to resolve a
+		 * conflict).
+		 */
+		if (strcmp(refname, get_relation_name(rte->relid)) != 0)
+			printalias = true;
+	}
+	else if (rte->rtekind == RTE_FUNCTION)
+	{
+		/*
+		 * For a function RTE, always print alias.  This covers possible
+		 * renaming of the function and/or instability of the FigureColname
+		 * rules for things that aren't simple functions.  Note we'd need to
+		 * force it anyway for the columndef list case.
+		 */
+		printalias = true;
+	}
+	else if (rte->rtekind == RTE_SUBQUERY ||
+			 rte->rtekind == RTE_VALUES)
+	{
+		/* Alias is syntactically required for SUBQUERY and VALUES */
+		printalias = true;
+	}
+	else if (rte->rtekind == RTE_CTE)
+	{
+		/*
+		 * No need to print alias if it's same as CTE name (this would
+		 * normally be the case, but not if set_rtable_names had to resolve a
+		 * conflict).
+		 */
+		if (strcmp(refname, rte->ctename) != 0)
+			printalias = true;
+	}
+
+	if (printalias)
+		appendStringInfo(context->buf, "%s%s",
+						 use_as ? " AS " : " ",
+						 quote_identifier(refname));
+}
+
 static void
 get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 {
@@ -10633,57 +10738,19 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 		}
 
 		/* Print the relation alias, if needed */
-		printalias = false;
-		if (rte->alias != NULL)
-		{
-			/* Always print alias if user provided one */
-			printalias = true;
-		}
-		else if (colinfo->printaliases)
-		{
-			/* Always print alias if we need to print column aliases */
-			printalias = true;
-		}
-		else if (rte->rtekind == RTE_RELATION)
-		{
+		get_rte_alias(rte, varno, false, context);
+		if (pgduckdb_func_returns_duckdb_row(rtfunc1)) {
 			/*
-			 * No need to print alias if it's same as relation name (this
-			 * would normally be the case, but not if set_rtable_names had to
-			 * resolve a conflict).
+			 * We never want to print column aliases for functions that return
+			 * a duckdb.row. The common pattern is for people to not provide an
+			 * explicit column alias (i.e. "r" becomes "r(r)"). This obviously
+			 * is a naming collision and DuckDB resolves that in the opposite
+			 * way that we want. Never adding column aliases for duckdb.row
+			 * avoids this conflict.
 			 */
-			if (strcmp(refname, get_relation_name(rte->relid)) != 0)
-				printalias = true;
 		}
-		else if (rte->rtekind == RTE_FUNCTION || rte->rtekind == RTE_TABLEFUNCTION)
-		{
-			/*
-			 * For a function RTE, always print alias.  This covers possible
-			 * renaming of the function and/or instability of the
-			 * FigureColname rules for things that aren't simple functions.
-			 * Note we'd need to force it anyway for the columndef list case.
-			 */
-			printalias = true;
-		}
-		else if (rte->rtekind == RTE_VALUES)
-		{
-			/* Alias is syntactically required for VALUES */
-			printalias = true;
-		}
-		else if (rte->rtekind == RTE_CTE)
-		{
-			/*
-			 * No need to print alias if it's same as CTE name (this would
-			 * normally be the case, but not if set_rtable_names had to
-			 * resolve a conflict).
-			 */
-			if (strcmp(refname, rte->ctename) != 0)
-				printalias = true;
-		}
-		if (printalias)
-			appendStringInfo(buf, " %s", quote_identifier(refname));
-
 		/* Print the column definitions or aliases, if needed */
-		if (rtfunc1 && rtfunc1->funccolnames != NIL)
+		else if (rtfunc1 && rtfunc1->funccolnames != NIL)
 		{
 			/* Reconstruct the columndef list, which is also the aliases */
 			get_from_clause_coldeflist(rtfunc1, colinfo, context);
@@ -11408,6 +11475,10 @@ generate_function_name(Oid funcid, int nargs, List *argnames, Oid *argtypes,
 	Oid			p_vatype;
 	Oid		   *p_true_typeids;
 	bool		force_qualify = false;
+
+	result = pgduckdb_function_name(funcid, use_variadic_p);
+	if (result)
+		return result;
 
 	proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
 	if (!HeapTupleIsValid(proctup))
