@@ -73,7 +73,7 @@
 #include "utils/lsyscache.h"
 #include "utils/partcache.h"
 #include "utils/rel.h"
-#include "utils/ruleutils.h"
+#include "pgduckdb/vendor/pg_ruleutils.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/typcache.h"
@@ -81,6 +81,15 @@
 #include "utils/xml.h"
 
 #include "cdb/cdbhash.h"
+
+#include "pgduckdb/pgduckdb_ruleutils.h"
+
+#include "pgduckdb/utility/rename_ruleutils.h"
+
+/* Standard conversion of a "bool pretty" option to detailed flags */
+#define GET_PRETTY_FLAGS(pretty) \
+	((pretty) ? (PRETTYFLAG_PAREN | PRETTYFLAG_INDENT | PRETTYFLAG_SCHEMA) \
+	 : 0)
 
 /* ----------
  * Pretty formatting constants
@@ -477,8 +486,10 @@ static void get_opclass_name(Oid opclass, Oid actual_datatype,
 static Node *processIndirection(Node *node, deparse_context *context);
 static void printSubscripts(SubscriptingRef *sbsref, deparse_context *context);
 static char *get_relation_name(Oid relid);
+#if 0
 static char *generate_relation_name(Oid relid, List *namespaces);
 static char *generate_qualified_relation_name(Oid relid);
+#endif
 static char *generate_function_name(Oid funcid, int nargs,
 									List *argnames, Oid *argtypes,
 									bool has_variadic, bool *use_variadic_p,
@@ -11264,6 +11275,7 @@ get_relation_name(Oid relid)
 	return relname;
 }
 
+#if 0
 /*
  * generate_relation_name
  *		Compute the name to display for a relation specified by OID
@@ -11360,6 +11372,7 @@ generate_qualified_relation_name(Oid relid)
 
 	return result;
 }
+#endif
 
 /*
  * generate_function_name
@@ -11919,6 +11932,31 @@ get_range_partbound_string(List *bound_datums)
 	appendStringInfoChar(buf, ')');
 
 	return buf->data;
+}
+
+/* ----------
+ * pg_get_querydef
+ *
+ * Public entry point to deparse one query parsetree.
+ * The pretty flags are determined by GET_PRETTY_FLAGS(pretty).
+ *
+ * The result is a palloc'd C string.
+ * ----------
+ */
+char *
+pg_get_querydef(Query *query, bool pretty)
+{
+	StringInfoData buf;
+	int			prettyFlags;
+
+	prettyFlags = GET_PRETTY_FLAGS(pretty);
+
+	initStringInfo(&buf);
+
+	get_query_def(query, &buf, NIL, NULL,
+				  prettyFlags, WRAP_COLUMN_DEFAULT, 0);
+
+	return buf.data;
 }
 
 #endif // PG_VERSION_NUM < 140000
