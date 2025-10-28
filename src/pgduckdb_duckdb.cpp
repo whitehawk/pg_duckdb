@@ -313,11 +313,13 @@ DuckDBManager::RefreshConnectionState(duckdb::ClientContext &context) {
 		                                 duckdb::KeywordHelper::WriteQuoted(duckdb_azure_transport_option_type));
 	}
 
+#if 0
 	const auto extensions_table_last_seq = GetSeqLastValue("extensions_table_seq");
 	if (IsExtensionsSeqLessThan(extensions_table_last_seq)) {
 		LoadExtensions(context);
 		UpdateExtensionsSeq(extensions_table_last_seq);
 	}
+#endif
 
 	if (!secrets_valid) {
 		DropSecrets(context);
