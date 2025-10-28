@@ -6905,6 +6905,11 @@ get_variable(Var *var, int levelsup, bool istoplevel, deparse_context *context)
 		if (attnum > colinfo->num_cols)
 			elog(ERROR, "invalid attnum %d for relation \"%s\"",
 				 attnum, rte->eref->aliasname);
+
+		if (pgduckdb_var_is_duckdb_row(var)) {
+			return pgduckdb_write_row_refname(context->buf, refname, istoplevel);
+		}
+
 		attname = colinfo->colnames[attnum - 1];
 		if (attname == NULL)	/* dropped column? */
 			elog(ERROR, "invalid attnum %d for relation \"%s\"",
@@ -9532,12 +9537,13 @@ get_oper_expr(OpExpr *expr, deparse_context *context)
 		Node	   *arg1 = (Node *) linitial(args);
 		Node	   *arg2 = (Node *) lsecond(args);
 
+		char* op_name = generate_operator_name(opno, exprType(arg1), exprType(arg2));
+		void* ctx = pg_duckdb_get_oper_expr_make_ctx(op_name, &arg1, &arg2);
+		pg_duckdb_get_oper_expr_prefix(buf, ctx);
 		get_rule_expr_paren(arg1, context, true, (Node *) expr);
-		appendStringInfo(buf, " %s ",
-						 generate_operator_name(opno,
-												exprType(arg1),
-												exprType(arg2)));
+		pg_duckdb_get_oper_expr_middle(buf, ctx);
 		get_rule_expr_paren(arg2, context, true, (Node *) expr);
+		pg_duckdb_get_oper_expr_suffix(buf, ctx);
 	}
 	else
 	{
@@ -9984,6 +9990,10 @@ get_coercion_expr(Node *arg, deparse_context *context,
 			appendStringInfoChar(buf, ')');
 	}
 
+	if (pgduckdb_is_fake_type(resulttype)) {
+		return;
+	}
+
 	/*
 	 * Never emit resulttype(arg) functional notation. A pg_proc entry could
 	 * take precedence, and a resulttype in pg_temp would require schema
@@ -10018,6 +10028,8 @@ get_const_expr(Const *constval, deparse_context *context, int showtype)
 	bool		typIsVarlena;
 	char	   *extval;
 	bool		needlabel = false;
+
+	showtype = pgduckdb_show_type(constval, showtype);
 
 	if (constval->constisnull)
 	{
@@ -10616,6 +10628,9 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 				break;
 			case RTE_SUBQUERY:
 				/* Subquery RTE */
+				if (pgduckdb_replace_subquery_with_view(rte->subquery, buf)) {
+					break;
+				}
 				appendStringInfoChar(buf, '(');
 				get_query_def(rte->subquery, buf, context->namespaces, NULL,
 							  context->prettyFlags, context->wrapColumn,
@@ -11001,6 +11016,10 @@ get_tablesample_def(TableSampleClause *tablesample, deparse_context *context)
 		if (nargs++ > 0)
 			appendStringInfoString(buf, ", ");
 		get_rule_expr((Node *) lfirst(l), context, false);
+		const char *tsm_name = generate_function_name(tablesample->tsmhandler, 1,
+											NIL, argtypes,
+											false, NULL, EXPR_KIND_NONE);
+		pgduckdb_add_tablesample_percent(tsm_name, buf, list_length(tablesample->args));
 	}
 	appendStringInfoChar(buf, ')');
 
